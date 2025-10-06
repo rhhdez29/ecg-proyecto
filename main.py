@@ -78,13 +78,21 @@ class Grafica(Frame):
                 if tiempo_actual > ventana_de_tiempo:
                     ax.set_xlim(tiempo_actual - ventana_de_tiempo, tiempo_actual)
 
+                # AÑADE ESTA LÍNEA AL FINAL
+                return self.line, # Devuelve una tupla de los artistas actualizados
+
         except ValueError:
             # Ignorar silenciosamente datos que no se pueden convertir a float
             pass
-        
+
+    # En la clase Grafica, añade esta nueva función
+    def init_animacion(self):
+        self.line.set_data([], [])
+        return self.line, # Devuelve una tupla de los artistas a animar
+
     def iniciar(self,):
         self.time_inicio = time.time()
-        self.ani = animation.FuncAnimation(self.fig, self.animate, interval=100, blit=False)
+        self.ani = animation.FuncAnimation(self.fig, self.animate, init_func=self.init_animacion ,interval=20, blit=True)
         self.bt_graficar.config(state='disabled')
         self.bt_pausar.config(state='normal')
         self.bt_captura.config(state='normal')
