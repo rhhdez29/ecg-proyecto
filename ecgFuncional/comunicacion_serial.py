@@ -1,11 +1,12 @@
 import serial, serial.tools.list_ports
-from threading import  Thread, Event
-from tkinter import  StringVar
+from threading import Thread, Event
+import queue # Importamos la librería queue
 
 class Comunicacion():
     def __init__(self, *args):
         super().__init__(*args)
-        self.datos_recibidos = StringVar()
+        # Usamos una cola en lugar de StringVar para almacenar los datos
+        self.datos_recibidos = queue.Queue()
 
         self.arduino = serial.Serial()
         self.arduino.timeout = 0.5
@@ -40,12 +41,11 @@ class Comunicacion():
         try:
             while(self.señal.is_set() and self.arduino.is_open):
                 try:
-                    # Usar errors='ignore' para evitar que un mal byte detenga todo
                     data = self.arduino.readline().decode('utf-8', errors='ignore').strip()
-                    # Procesar cualquier cadena no vacía (corrige el error de un solo dígito)
                     if data:
-                        self.datos_recibidos.set(data)
-                except TypeError: # Ocurre a veces al cerrar el puerto
+                        # En lugar de .set(), usamos .put() para añadir a la cola
+                        self.datos_recibidos.put(data)
+                except TypeError:
                     pass
         except serial.SerialException:
             print("Puerto desconectado o error de lectura.")
