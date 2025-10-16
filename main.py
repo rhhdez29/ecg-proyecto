@@ -96,6 +96,8 @@ class Grafica(ctk.CTkFrame):
         self.bt_graficar.configure(state='disabled')
         self.bt_pausar.configure(state='normal')
         self.bt_captura.configure(state='normal')
+        self.combobox_filtro.configure(state='readonly')
+        self.combobox_hz.configure(state='readonly')
         self.canvas.draw()
 
     def pausar(self):
@@ -160,30 +162,52 @@ class Grafica(ctk.CTkFrame):
 
         filtro_container = ctk.CTkFrame(botones_grafica_frame, fg_color="transparent")
         filtro_container.pack(pady=10, padx=5, side='left', expand=True)
-        ctk.CTkLabel(filtro_container, text='Filtros ECG').pack()
+
         # --- Se añade la nueva opción de filtro ---
-        self.filtros_disponibles = ["Sin Filtro", "Filtro Notch (50Hz)", "Pasa Bajos (50Hz)"]
-        self.combobox_filtro = ctk.CTkComboBox(filtro_container, values=self.filtros_disponibles, justify='center', state='readonly', command=self.seleccionar_filtro)
+        ctk.CTkLabel(filtro_container, text='Tipo de Filtro').pack()
+        self.filtros_disponibles = ["Sin Filtro", "Filtro Notch", "Pasa Bajos"]
+        self.combobox_filtro = ctk.CTkComboBox(filtro_container, values=self.filtros_disponibles, justify='center', state='disabled', command=self.seleccionar_filtro)
         self.combobox_filtro.pack()
         self.combobox_filtro.set("Sin Filtro")
 
+        # --- COMBOBOX PARA FRECUENCIAS ---
+        hz_container = ctk.CTkFrame(botones_grafica_frame, fg_color="transparent")
+        hz_container.pack(pady=10, padx=5, side='left', expand=True)
+
+        ctk.CTkLabel(hz_container, text='Frecuencia de Corte').pack()
+        self.hz_disponibles = ["30Hz", "40Hz", "50Hz", "60Hz", "70Hz", "100Hz"]
+        self.combobox_hz = ctk.CTkComboBox(hz_container, values=self.hz_disponibles, justify='center', state='disabled', command=self.seleccionar_frecuencia)
+        self.combobox_hz.pack()
+        self.combobox_hz.set("50Hz")
+
     def seleccionar_filtro(self, choice):
-        self.filtro_seleccionado = choice
-        fs = 250.0  # Frecuencia de muestreo en Hz
-        
-        if self.filtro_seleccionado == "Pasa Bajos (50Hz)":
-            cutoff_freq = 50.0
+        # Habilitar o deshabilitar el combobox de Hz según el filtro seleccionado
+        if choice in ["Pasa Bajos", "Filtro Notch"]:
+            self.combobox_hz.configure(state='readonly')
+        else:
+            self.combobox_hz.configure(state='disabled')
+        self._actualizar_filtro()
+
+    def seleccionar_frecuencia(self, choice):
+        # Extraer el número de la cadena (ej. "50Hz" -> 50.0)
+        self.cutoff_freq = float(choice.replace("Hz", ""))
+        self._actualizar_filtro()
+
+    def _actualizar_filtro(self):
+        filtro_seleccionado = self.combobox_filtro.get()
+        fs = 250.0
+
+        if filtro_seleccionado == "Pasa Bajos":
             nyquist_freq = 0.5 * fs
             order = 4
-            self.b, self.a = butter(order, cutoff_freq / nyquist_freq, btype='low')
-            print("Filtro Pasa Bajos (50Hz) activado.")
+            self.b, self.a = butter(order, self.cutoff_freq / nyquist_freq, btype='low')
+            print(f"Filtro Pasa Bajos ({self.cutoff_freq}Hz) activado.")
         
-        # --- Lógica para el Filtro Notch ---
-        elif self.filtro_seleccionado == "Filtro Notch (50Hz)":
-            f0 = 50.0  # Frecuencia a eliminar (ruido de línea eléctrica)
-            Q = 30.0   # Factor de calidad (qué tan estrecha es la banda de rechazo)
+        elif filtro_seleccionado == "Filtro Notch":
+            f0 = self.cutoff_freq  # Frecuencia a eliminar
+            Q = 30.0
             self.b, self.a = iirnotch(f0, Q, fs=fs)
-            print("Filtro Notch (50Hz) activado.")
+            print(F"Filtro Notch ({self.cutoff_freq}Hz) activado.")
             
         else: # "Sin Filtro"
             self.b, self.a = None, None
@@ -200,6 +224,7 @@ class Grafica(ctk.CTkFrame):
         self.bt_desconectar.configure(state='normal')
         self.bt_graficar.configure(state='normal')
         self.bt_reanudar.configure(state='disabled')
+
         
         self.datos_arduino.arduino.port = self.combobox_port.get()
         self.datos_arduino.conexion_serial()
