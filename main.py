@@ -9,6 +9,7 @@ import collections
 import time
 # Se añade iirnotch para el filtro de rechazo de banda
 from scipy.signal import butter, filtfilt, iirnotch
+import queue
 
 # --- Configuración de la apariencia ---
 ctk.set_appearance_mode("System")
@@ -97,7 +98,10 @@ class Grafica(ctk.CTkFrame):
         self.bt_pausar.configure(state='normal')
         self.bt_captura.configure(state='normal')
         self.combobox_filtro.configure(state='readonly')
-        self.combobox_hz.configure(state='readonly')
+        self.entry_y_min.configure(state='normal')
+        self.entry_y_max.configure(state='normal')
+        self.bt_aplicar_y.configure(state='normal')
+
         self.canvas.draw()
 
     def pausar(self):
@@ -151,6 +155,21 @@ class Grafica(ctk.CTkFrame):
         self.bt_desconectar = ctk.CTkButton(controles_frame, text='Desconectar', command=self.desconectar_serial, state='disabled', fg_color="red")
         self.bt_desconectar.pack(pady=10, ipady=5, fill='x', padx=20)
 
+        ctk.CTkLabel(controles_frame, text='Rango Eje Y', font=('Arial', 16, 'bold')).pack(pady=(20, 5))
+        
+        self.entry_y_min = ctk.CTkEntry(controles_frame, placeholder_text="Y Mínimo", )
+        self.entry_y_min.pack(pady=5, fill='x', padx=20)
+        self.entry_y_min.configure(state='disabled')
+        
+        self.entry_y_max = ctk.CTkEntry(controles_frame, placeholder_text="Y Máximo")
+        self.entry_y_max.pack(pady=5, fill='x', padx=20)
+        self.entry_y_max.configure(state='disabled')
+        
+        # Botón para aplicar los cambios del eje Y
+        self.bt_aplicar_y = ctk.CTkButton(controles_frame, text='Aplicar Rango Y', command=self.aplicar_rango_y)
+        self.bt_aplicar_y.pack(pady=10, ipady=5, fill='x', padx=20)
+        self.bt_aplicar_y.configure(state='disabled')
+
         self.bt_graficar = ctk.CTkButton(botones_grafica_frame, text='Graficar Señal', state='disabled', command=self.iniciar)
         self.bt_graficar.pack(pady=10, padx=5, side='left', expand=True)
         self.bt_pausar = ctk.CTkButton(botones_grafica_frame, text='Pausar', state='disabled', command=self.pausar)
@@ -166,9 +185,10 @@ class Grafica(ctk.CTkFrame):
         # --- Se añade la nueva opción de filtro ---
         ctk.CTkLabel(filtro_container, text='Tipo de Filtro').pack()
         self.filtros_disponibles = ["Sin Filtro", "Filtro Notch", "Pasa Bajos"]
-        self.combobox_filtro = ctk.CTkComboBox(filtro_container, values=self.filtros_disponibles, justify='center', state='disabled', command=self.seleccionar_filtro)
+        self.combobox_filtro = ctk.CTkComboBox(filtro_container, values=self.filtros_disponibles, justify='center', state='readonly', command=self.seleccionar_filtro)
         self.combobox_filtro.pack()
         self.combobox_filtro.set("Sin Filtro")
+        self.combobox_filtro.configure(state='disabled')
 
         # --- COMBOBOX PARA FRECUENCIAS ---
         hz_container = ctk.CTkFrame(botones_grafica_frame, fg_color="transparent")
@@ -176,9 +196,12 @@ class Grafica(ctk.CTkFrame):
 
         ctk.CTkLabel(hz_container, text='Frecuencia de Corte').pack()
         self.hz_disponibles = ["30Hz", "40Hz", "50Hz", "60Hz", "70Hz", "100Hz"]
-        self.combobox_hz = ctk.CTkComboBox(hz_container, values=self.hz_disponibles, justify='center', state='disabled', command=self.seleccionar_frecuencia)
+        self.combobox_hz = ctk.CTkComboBox(hz_container, values=self.hz_disponibles, justify='center', state='readonly', command=self.seleccionar_frecuencia)
         self.combobox_hz.pack()
         self.combobox_hz.set("50Hz")
+        self.combobox_hz.configure(state='disabled')
+
+        
 
     def seleccionar_filtro(self, choice):
         # Habilitar o deshabilitar el combobox de Hz según el filtro seleccionado
@@ -186,7 +209,7 @@ class Grafica(ctk.CTkFrame):
             self.combobox_hz.configure(state='readonly')
         else:
             self.combobox_hz.configure(state='disabled')
-        self._actualizar_filtro()
+        self.seleccionar_frecuencia(self.combobox_hz.get())
 
     def seleccionar_frecuencia(self, choice):
         # Extraer el número de la cadena (ej. "50Hz" -> 50.0)
@@ -234,6 +257,15 @@ class Grafica(ctk.CTkFrame):
         self.bt_desconectar.configure(state='disabled')
         self.bt_pausar.configure(state='disabled')
         self.bt_graficar.configure(state='disabled')
+        self.bt_reanudar.configure(state='disabled')
+        self.bt_captura.configure(state='disabled')
+        self.combobox_filtro.configure(state='disabled')
+        self.entry_y_min.configure(state='disabled')
+        self.entry_y_max.configure(state='disabled')
+        self.combobox_hz.configure(state='disabled')
+        self.bt_aplicar_y.configure(state='disabled')
+
+
         try:
             if self.ani:
                 self.ani.event_source.stop()
@@ -248,6 +280,45 @@ class Grafica(ctk.CTkFrame):
         self.line.set_data(self.datos_tiempo, self.datos_senal_uno)
         plt.xlim([0, 10])
         self.canvas.draw()
+
+    def aplicar_rango_y(self):
+        """
+        Toma los valores de los ctk.CTkEntry para actualizar
+        los límites del eje Y de la gráfica (self.ax).
+        """
+        try:
+            y_min_str = self.entry_y_min.get()
+            y_max_str = self.entry_y_max.get()
+
+            # Obtener los límites actuales para usarlos si un campo está vacío
+            current_y_min, current_y_max = self.ax.get_ylim()
+
+            # Convertir a float solo si el string no está vacío
+            y_min = float(y_min_str) if y_min_str else current_y_min
+            y_max = float(y_max_str) if y_max_str else current_y_max
+
+            # Validación simple
+            if y_min >= y_max:
+                print("Error: 'Y Mínimo' debe ser menor que 'Y Máximo'.")
+                return # No aplicar cambios
+
+            # Aplicar los nuevos límites al eje
+            self.ax.set_ylim(y_min, y_max)
+            
+            # Redibujar el canvas para que los cambios sean visibles
+            self.canvas.draw()
+            
+            print(f"Rango Y actualizado a: ({y_min}, {y_max})")
+            #Limpiamos los ctkEntry
+            self.entry_y_min.delete(0, 'end')
+            self.entry_y_max.delete(0, 'end')
+
+
+        except ValueError:
+            # Mostramos una alerta si el usuario escribe texto no numérico
+            print("Error: Los valores de 'Y Mínimo' y 'Y Máximo' deben ser números.")
+        except Exception as e:
+            print(f"Error al aplicar rango Y: {e}")
 
 if __name__ == '__main__':
     ventana = ctk.CTk()
