@@ -147,6 +147,9 @@ class Grafica(ctk.CTkFrame):
         self.combobox_port.pack(pady=5)
         if self.datos_arduino.puertos:
             self.combobox_port.set(self.datos_arduino.puertos[0])
+        else:
+            self.combobox_port.set("Sin puertos disponibles")
+
 
         self.bt_conectar = ctk.CTkButton(controles_frame, text='Conectar', command=self.conectar_serial, fg_color="green")
         self.bt_conectar.pack(pady=10, ipady=5, fill='x', padx=20)
