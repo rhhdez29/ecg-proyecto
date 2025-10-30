@@ -22,7 +22,7 @@ class Comunicacion():
 
     def conexion_serial(self):
         try:
-            self.arduino.baudrate = 9600
+            self.arduino.baudrate = 115200
             self.arduino.open()
             if (self.arduino.is_open):
                 self.iniciar_hilo()
