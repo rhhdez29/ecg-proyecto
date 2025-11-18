@@ -8,10 +8,10 @@ from comunicacion_serial import Comunicacion
 import collections
 import time
 # Se añade iirnotch para el filtro de rechazo de banda
-from scipy.signal import butter, filtfilt, iirnotch
+from scipy.signal import butter, filtfilt, iirnotch, lfilter
 import queue
 
-# --- Configuración de la apariencia ---
+# --- Configuración de la apariencia --- 
 ctk.set_appearance_mode("System")
 ctk.set_default_color_theme("blue")
 
@@ -27,7 +27,12 @@ class Grafica(ctk.CTkFrame):
         self.datos_arduino = Comunicacion()
         self.datos_arduino.puertos_disponibles()
 
-        self.muestra = 2500
+        self.fs_actual = 250.0 # Frecuencia inicial 
+        self.ventana_tiempo_seg = 10.0 # Ventana de tiempo deseada
+
+        #Cálculo del número de muestras en la ventana de tiempo 
+        self.muestra = int(self.fs_actual * self.ventana_tiempo_seg) 
+
         self.datos = 0.0
 
         # --- Creación de la figura de Matplotlib ---
@@ -51,6 +56,12 @@ class Grafica(ctk.CTkFrame):
         plt.xlabel('Tiempo (s)', color='white')
         self.widgets()
 
+        # --- Variables para medir FS ---
+        self.fs_contador_muestras = 0
+        self.fs_tiempo_inicio = None
+        self.fs_calculada = 0.0
+        self.fs_actual = 250.0 # Valor inicial
+
     def animate(self, i):
         # Bucle para procesar todos los datos acumulados en la cola
         while not self.datos_arduino.datos_recibidos.empty():
@@ -65,26 +76,60 @@ class Grafica(ctk.CTkFrame):
                     self.datos_tiempo.append(tiempo_actual)
                     self.datos_senal_uno.append(valor_numerico)
 
+                    self.fs_contador_muestras += 1
+
             except (ValueError, queue.Empty):
                 # Ignorar datos que no se pueden convertir o si la cola se vacía
                 continue
 
         # El resto del código de graficado se ejecuta una sola vez por frame
         try:
+
+            # --- CÁLCULO Y ACTUALIZACIÓN DE FS ---
+            if self.fs_tiempo_inicio:
+                tiempo_transcurrido = time.time() - self.fs_tiempo_inicio
+                if tiempo_transcurrido > 1.0: # Empezar a calcular después de 1 seg
+                    self.fs_calculada = self.fs_contador_muestras / tiempo_transcurrido
+                    self.label_fs.configure(text=f'{self.fs_calculada:.2f} Hz')
+            # --- FIN CÁLCULO FS ---
+
             senal_a_graficar = self.datos_senal_uno
-            if self.b is not None and self.a is not None:
-                if len(self.datos_senal_uno) > 3 * max(len(self.a), len(self.b)):
-                    senal_a_graficar = filtfilt(self.b, self.a, self.datos_senal_uno)
+
+            # --- FIX 1: CORRECCIÓN DEL FILTRO ---
+            # Comprobamos que el filtro (self.a, self.b) NO es None
+            # Y que hay suficientes datos para filtrarlos
+            if (self.b is not None and 
+                self.a is not None and 
+                len(self.datos_senal_uno) > max(len(self.a), len(self.b))):
+                
+                # Usamos lfilter para el procesamiento en tiempo real
+                senal_a_graficar = lfilter(self.b, self.a, self.datos_senal_uno)
+            
+            # Si no se cumplen las condiciones, se grafica la señal cruda
+            # (que ya está asignada en 'senal_a_graficar = self.datos_senal_uno')
 
             self.line.set_data(self.datos_tiempo, senal_a_graficar)
             
             ax = self.line.axes
             ventana_de_tiempo = 10
-            if tiempo_actual > ventana_de_tiempo:
-                ax.set_xlim(tiempo_actual - ventana_de_tiempo, tiempo_actual)
+            
+            # --- FIX 2: CORRECCIÓN DE 'tiempo_actual' ---
+            # Usamos el último valor del deque, ya que 'tiempo_actual'
+            # solo existe si entraron nuevos datos en este frame.
+            ventana_de_tiempo = self.ventana_tiempo_seg
+            
+            tiempo_max_visible = self.datos_tiempo[-1]
+            
+            if tiempo_max_visible > ventana_de_tiempo:
+                ax.set_xlim(tiempo_max_visible - ventana_de_tiempo, tiempo_max_visible)
 
             return self.line,
-        except NameError: # Pasa si no hubo datos nuevos
+
+        except IndexError: 
+            # Ocurre si self.datos_tiempo está vacío (muy al inicio)
+            return self.line,
+        except NameError: 
+            # Por si 'tiempo_max_visible' falla
             return self.line,
 
     def init_animacion(self):
@@ -92,6 +137,11 @@ class Grafica(ctk.CTkFrame):
         return self.line,
 
     def iniciar(self):
+
+        self.fs_contador_muestras = 0
+        self.fs_tiempo_inicio = time.time()
+        self.label_fs.configure(text='Calculando...')
+
         self.time_inicio = time.time()
         self.ani = animation.FuncAnimation(self.fig, self.animate, init_func=self.init_animacion, interval=20, blit=True)
         self.bt_graficar.configure(state='disabled')
@@ -173,6 +223,23 @@ class Grafica(ctk.CTkFrame):
         self.bt_aplicar_y.pack(pady=10, ipady=5, fill='x', padx=20)
         self.bt_aplicar_y.configure(state='disabled')
 
+        # --- WIDGETS PARA CONTROLAR FS ---
+        ctk.CTkLabel(controles_frame, text='Frec. Muestreo (Hz)', font=('Arial', 16, 'bold')).pack(pady=(20, 5))
+        
+        self.entry_fs = ctk.CTkEntry(controles_frame, placeholder_text="Nueva FS (ej: 250)")
+        self.entry_fs.pack(pady=5, fill='x', padx=20)
+        self.entry_fs.configure(state='disabled') 
+        
+        self.bt_aplicar_fs = ctk.CTkButton(controles_frame, text='Aplicar Frecuencia', command=self.aplicar_nueva_frecuencia)
+        self.bt_aplicar_fs.pack(pady=10, ipady=5, fill='x', padx=20)
+        self.bt_aplicar_fs.configure(state='disabled')
+
+        # --- ETIQUETA PARA MOSTRAR FS ---
+        ctk.CTkLabel(controles_frame, text='Frec. de Muestreo (fs):', font=('Arial', 14, 'bold')).pack(pady=(20, 0))
+        self.label_fs = ctk.CTkLabel(controles_frame, text='N/A', font=('Arial', 14))
+        self.label_fs.pack(pady=5)
+        # --- FIN DE ETIQUETA FS ---
+
         self.bt_graficar = ctk.CTkButton(botones_grafica_frame, text='Graficar Señal', state='disabled', command=self.iniciar)
         self.bt_graficar.pack(pady=10, padx=5, side='left', expand=True)
         self.bt_pausar = ctk.CTkButton(botones_grafica_frame, text='Pausar', state='disabled', command=self.pausar)
@@ -221,7 +288,7 @@ class Grafica(ctk.CTkFrame):
 
     def _actualizar_filtro(self):
         filtro_seleccionado = self.combobox_filtro.get()
-        fs = 250.0
+        fs = self.fs_actual  # Frecuencia de muestreo estimada
 
         if filtro_seleccionado == "Pasa Bajos":
             nyquist_freq = 0.5 * fs
@@ -231,13 +298,56 @@ class Grafica(ctk.CTkFrame):
         
         elif filtro_seleccionado == "Filtro Notch":
             f0 = self.cutoff_freq  # Frecuencia a eliminar
-            Q = 30.0
+            Q = 20.0
             self.b, self.a = iirnotch(f0, Q, fs=fs)
             print(F"Filtro Notch ({self.cutoff_freq}Hz) activado.")
             
         else: # "Sin Filtro"
             self.b, self.a = None, None
             print("Filtros desactivados.")
+
+    def aplicar_nueva_frecuencia(self):
+        """
+        Toma la frecuencia del entry, la envía al Arduino
+        y actualiza la 'fs' de los filtros locales.
+        """
+        nueva_fs_str = self.entry_fs.get()
+        try:
+            # 1. Validar que es un entero
+            nueva_fs_int = int(nueva_fs_str)
+            
+            # 2. Validar rango (el Arduino también lo checa)
+            if nueva_fs_int < 50 or nueva_fs_int > 500:
+                print("Error: La frecuencia debe estar entre 50 y 500 Hz.")
+                return
+
+            # 3. Enviar el dato al Arduino
+            self.datos_arduino.enviar_datos(nueva_fs_int) 
+            print(f"Enviando nueva FS al Arduino: {nueva_fs_int} Hz")
+            
+            # 4. ACTUALIZAR FS LOCAL Y FILTROS (¡MUY IMPORTANTE!)
+            self.fs_actual = float(nueva_fs_int)
+            self._actualizar_filtro() # Recalcula los filtros con la nueva FS
+
+            # Calculamos el nuevo tamaño del búfer
+            self.muestra = int(self.fs_actual * self.ventana_tiempo_seg)
+            print(f"Actualizando tamaño de búfer a: {self.muestra} muestras")
+
+            self.datos_senal_uno = collections.deque([0] * self.muestra, maxlen=self.muestra)
+            self.datos_tiempo = collections.deque([0.0] * self.muestra, maxlen=self.muestra)
+            
+            # 5. Limpiar el entry
+            self.entry_fs.delete(0, 'end')
+
+            # 6. Resetear el medidor de FS para confirmar el cambio
+            self.fs_contador_muestras = 0
+            self.fs_tiempo_inicio = time.time()
+            self.label_fs.configure(text='Calculando...')
+
+        except ValueError:
+            print(f"Error: '{nueva_fs_str}' no es un número entero válido.")
+        except Exception as e:
+            print(f"Error al enviar frecuencia: {e}")
 
     def actualizar_puertos(self):
         self.datos_arduino.puertos_disponibles()
@@ -250,6 +360,8 @@ class Grafica(ctk.CTkFrame):
         self.bt_desconectar.configure(state='normal')
         self.bt_graficar.configure(state='normal')
         self.bt_reanudar.configure(state='disabled')
+        self.entry_fs.configure(state='normal')
+        self.bt_aplicar_fs.configure(state='normal')
 
         
         self.datos_arduino.arduino.port = self.combobox_port.get()
@@ -267,6 +379,8 @@ class Grafica(ctk.CTkFrame):
         self.entry_y_max.configure(state='disabled')
         self.combobox_hz.configure(state='disabled')
         self.bt_aplicar_y.configure(state='disabled')
+        self.entry_fs.configure(state='disabled')
+        self.bt_aplicar_fs.configure(state='disabled')
 
 
         try:
@@ -283,6 +397,9 @@ class Grafica(ctk.CTkFrame):
         self.line.set_data(self.datos_tiempo, self.datos_senal_uno)
         plt.xlim([0, 10])
         self.canvas.draw()
+        # --- REINICIAR LABEL FS ---
+        self.label_fs.configure(text='N/A')
+        self.fs_tiempo_inicio = None
 
     def aplicar_rango_y(self):
         """
