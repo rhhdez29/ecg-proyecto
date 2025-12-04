@@ -7,11 +7,9 @@ import matplotlib.animation as animation
 from comunicacion_serial import Comunicacion
 import collections
 import time
-# Se añade iirnotch para el filtro de rechazo de banda
 from scipy.signal import butter, filtfilt, iirnotch, lfilter
 import queue
 
-# --- Configuración de la apariencia --- 
 ctk.set_appearance_mode("System")
 ctk.set_default_color_theme("blue")
 
@@ -28,7 +26,7 @@ class Grafica(ctk.CTkFrame):
         self.datos_arduino.puertos_disponibles()
 
         self.fs_actual = 250.0 # Frecuencia inicial 
-        self.ventana_tiempo_seg = 10.0 # Ventana de tiempo deseada
+        self.ventana_tiempo_seg = 5.0 # Ventana de tiempo deseada
 
         #Cálculo del número de muestras en la ventana de tiempo 
         self.muestra = int(self.fs_actual * self.ventana_tiempo_seg) 
@@ -60,7 +58,7 @@ class Grafica(ctk.CTkFrame):
         self.fs_contador_muestras = 0
         self.fs_tiempo_inicio = None
         self.fs_calculada = 0.0
-        self.fs_actual = 250.0 # Valor inicial
+        self.fs_actual = 250.0
 
     def animate(self, i):
         # Bucle para procesar todos los datos acumulados en la cola
@@ -95,7 +93,6 @@ class Grafica(ctk.CTkFrame):
 
             senal_a_graficar = self.datos_senal_uno
 
-            # --- FIX 1: CORRECCIÓN DEL FILTRO ---
             # Comprobamos que el filtro (self.a, self.b) NO es None
             # Y que hay suficientes datos para filtrarlos
             if (self.b is not None and 
@@ -113,7 +110,6 @@ class Grafica(ctk.CTkFrame):
             ax = self.line.axes
             ventana_de_tiempo = 10
             
-            # --- FIX 2: CORRECCIÓN DE 'tiempo_actual' ---
             # Usamos el último valor del deque, ya que 'tiempo_actual'
             # solo existe si entraron nuevos datos en este frame.
             ventana_de_tiempo = self.ventana_tiempo_seg
@@ -238,7 +234,6 @@ class Grafica(ctk.CTkFrame):
         ctk.CTkLabel(controles_frame, text='Frec. de Muestreo (fs):', font=('Arial', 14, 'bold')).pack(pady=(20, 0))
         self.label_fs = ctk.CTkLabel(controles_frame, text='N/A', font=('Arial', 14))
         self.label_fs.pack(pady=5)
-        # --- FIN DE ETIQUETA FS ---
 
         self.bt_graficar = ctk.CTkButton(botones_grafica_frame, text='Graficar Señal', state='disabled', command=self.iniciar)
         self.bt_graficar.pack(pady=10, padx=5, side='left', expand=True)
